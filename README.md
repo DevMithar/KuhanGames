@@ -43,4 +43,4 @@ This app aims to provide engaging educational content for children with autism, 
 
 ## Contributing
 
-Feel free to add more games or improve accessibility features!
+Feel free to add more games or improve accessibility features! a
