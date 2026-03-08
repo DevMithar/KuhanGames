@@ -1,0 +1,38 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Launch Electron",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/node_modules/.bin/electron",
+      "args": ["."],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "outputCapture": "std"
+    },
+    {
+      "name": "Launch Web Server",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/server.js",
+      "console": "integratedTerminal"
+    },
+  ],
+  "compounds": [
+    {
+      "name": "Debug Electron",
+      "configurations": ["Launch Electron", "Debug Renderer Process"],
+      "presentation": {
+        "order": 1
+      }
+    },
+    {
+      "name": "Debug Web",
+      "configurations": ["Launch Web Server", "Debug Renderer Process"],
+      "presentation": {
+        "order": 2
+      }
+    }
+  ]
+}
