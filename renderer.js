@@ -323,7 +323,7 @@ let randomizeObjects = false;
 function handleKeyPress(event) {
   if (isPaused) return;
   const key = isUppercase ? event.key.toUpperCase() : event.key.toLowerCase();
-  const balloonIndex = currentBalloons.findIndex(b => b.textContent === key);
+  const balloonIndex = currentBalloons.findIndex(b => b.dataset.letter === key);
   if (balloonIndex !== -1) {
     const balloon = currentBalloons[balloonIndex];
     popBalloon(balloon, key);
@@ -830,6 +830,7 @@ function openObjectEditor() {
 
     const container = document.createElement('div');
     container.className = 'balloon';
+    container.dataset.letter = letter;
     container.style.position = 'absolute';
     container.style.width = '80px';
     container.style.height = '120px';
