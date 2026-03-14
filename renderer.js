@@ -628,24 +628,25 @@ function loadBalloonGame() {
         margin: 0 !important;
       }
       #fs-btn {
-        position: absolute;
-        top: 10px;
-        right: 10px;
-        z-index: 10001;
-        background: rgba(0,0,0,0.45);
-        color: #fff;
-        border: none;
-        border-radius: 10px;
-        padding: 7px 14px;
-        font-size: 1rem;
-        font-family: 'Nunito', Arial, sans-serif;
-        font-weight: 700;
+        font-size: 22px;
+        padding: 16px 28px;
+        border-radius: 14px;
+        background: linear-gradient(45deg, #4ECDC4, #45B7D1);
+        border: 2px solid #ffffff;
+        color: #222;
+        font-weight: bold;
         cursor: pointer;
-        backdrop-filter: blur(4px);
-        transition: background 0.2s;
-        line-height: 1.3;
+        box-shadow: 0 12px 18px rgba(0,0,0,0.25);
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
       }
-      #fs-btn:hover { background: rgba(0,0,0,0.65); }
+      #fs-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 16px 22px rgba(0,0,0,0.35);
+      }
+      #fs-btn:active {
+        transform: translateY(0);
+        box-shadow: 0 10px 14px rgba(0,0,0,0.35);
+      }
       #fs-score-overlay {
         display: none;
         position: absolute;
@@ -674,9 +675,9 @@ function loadBalloonGame() {
       <label><input type="checkbox" id="randomize-toggle" ${randomizeObjects ? 'checked' : ''} onchange="toggleRandomizeObjects()"> Random objects</label>
       <button class="start-btn" style="margin-left: 12px;" onclick="openObjectEditor()">Edit Objects</button>
     </div>
-    <button class="start-btn" onclick="startBalloonGame()">Start Game</button>
-    <div id="balloon-area" style="position: relative; background: linear-gradient(to bottom, #00BFFF 0%, #FFD700 50%, #32CD32 100%); border-radius: 10px; overflow: hidden;">
-      <button id="fs-btn" onclick="toggleBalloonFullscreen()">⛶ Full Screen</button>
+    <button class="start-btn" onclick="startBalloonGame()">▶ Start Game</button>
+    <button id="fs-btn" onclick="toggleBalloonFullscreen()">⛶ Full Screen</button>
+    <div id="balloon-area" style="position: relative; background: linear-gradient(to bottom, #00BFFF 0%, #FFD700 50%, #32CD32 100%); border-radius: 10px; overflow: hidden; margin-top: 10px;">
       <div id="fs-score-overlay">Score: 0</div>
       <!-- Balloons will be added here -->
     </div>
@@ -691,9 +692,9 @@ function startBalloonGame() {
   playStartMusic();
 
   const balloonArea = document.getElementById('balloon-area');
-  // Remove only balloons/confetti, preserve fullscreen UI elements
+  // Remove only balloons/confetti, preserve score overlay inside area
   [...balloonArea.children].forEach(child => {
-    if (child.id !== 'fs-btn' && child.id !== 'fs-score-overlay') child.remove();
+    if (child.id !== 'fs-score-overlay' && child.id !== 'fs-exit-btn') child.remove();
   });
   currentScore = 0;
   scoreDisplay = document.getElementById('score');
@@ -930,7 +931,21 @@ function toggleBalloonFullscreen() {
   const btn = document.getElementById('fs-btn');
   if (!area) return;
   const isFullscreen = area.classList.toggle('balloon-fullscreen');
-  if (btn) btn.textContent = isFullscreen ? '✕ Exit Full Screen' : '⛶ Full Screen';
+  if (btn) btn.textContent = isFullscreen ? '⛶ Exit Full Screen' : '⛶ Full Screen';
+  // Show/hide an in-area exit button when fullscreen
+  let exitBtn = document.getElementById('fs-exit-btn');
+  if (isFullscreen) {
+    if (!exitBtn) {
+      exitBtn = document.createElement('button');
+      exitBtn.id = 'fs-exit-btn';
+      exitBtn.textContent = '✕ Exit';
+      exitBtn.style.cssText = 'position:absolute;top:10px;right:12px;z-index:10002;background:rgba(0,0,0,0.5);color:#fff;border:none;border-radius:10px;padding:8px 16px;font-size:1rem;font-family:Nunito,Arial,sans-serif;font-weight:700;cursor:pointer;backdrop-filter:blur(4px);';
+      exitBtn.onclick = toggleBalloonFullscreen;
+      area.appendChild(exitBtn);
+    }
+  } else {
+    if (exitBtn) exitBtn.remove();
+  }
   // Sync score overlay with current score
   const score = document.getElementById('score');
   const fsScore = document.getElementById('fs-score-overlay');
