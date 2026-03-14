@@ -96,11 +96,16 @@ function startBgMusic() {
   if (bgMusicPlaying || selectedBgMusic === 'none') return;
   try {
     bgMusicCtx = new (window.AudioContext || window.webkitAudioContext)();
-    bgMusicGain = bgMusicCtx.createGain();
-    bgMusicGain.gain.value = 0.13;
-    bgMusicGain.connect(bgMusicCtx.destination);
-    bgMusicPlaying = true;
-    scheduleBgLoop();
+    // Mobile browsers (iOS/Android) start AudioContext suspended; must resume explicitly
+    bgMusicCtx.resume().then(() => {
+      bgMusicGain = bgMusicCtx.createGain();
+      bgMusicGain.gain.value = 0.13;
+      bgMusicGain.connect(bgMusicCtx.destination);
+      bgMusicPlaying = true;
+      scheduleBgLoop();
+    }).catch(() => {
+      // resume rejected (e.g. no user gesture yet) — will retry on next touch via unlock handler
+    });
   } catch(e) {}
 }
 
@@ -454,6 +459,27 @@ function loadGame(gameName) {
 // Initialize to home screen
 window.addEventListener('DOMContentLoaded', loadHome);
 
+// ── Mobile audio unlock ───────────────────────────────────────────────────────
+// iOS/Android suspend AudioContext until a user gesture. On the first touch
+// anywhere we resume any existing context and, if bg music should be playing
+// but got stuck, restart it.
+function _unlockAudio() {
+  if (bgMusicCtx && bgMusicCtx.state === 'suspended') {
+    bgMusicCtx.resume().catch(() => {});
+  } else if (!bgMusicPlaying && selectedBgMusic !== 'none') {
+    // Context was never created (page loaded but no prior gesture)
+    startBgMusic();
+  }
+  // Remove after first successful unlock
+  ['touchstart', 'touchend', 'pointerdown', 'click'].forEach(ev =>
+    document.removeEventListener(ev, _unlockAudio)
+  );
+}
+['touchstart', 'touchend', 'pointerdown', 'click'].forEach(ev =>
+  document.addEventListener(ev, _unlockAudio, { passive: true })
+);
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Toggle case function
 function toggleCase() {
   isUppercase = !isUppercase;
@@ -552,6 +578,14 @@ function loadBalloonGame() {
         75% { transform: scale(1.4) rotate(270deg); opacity: 0.3; }
         100% { transform: scale(0) rotate(360deg); opacity: 0; }
       }
+      @keyframes playAgainPulse {
+        0%   { transform: scale(1);    box-shadow: 0 12px 18px rgba(0,0,0,0.25); }
+        50%  { transform: scale(1.18); box-shadow: 0 20px 32px rgba(0,0,0,0.35); }
+        100% { transform: scale(1);    box-shadow: 0 12px 18px rgba(0,0,0,0.25); }
+      }
+      .play-again-pulse {
+        animation: playAgainPulse 0.8s ease-in-out infinite;
+      }
       /* Responsive */
       @media (max-width: 768px) {
         .balloon {
@@ -583,6 +617,54 @@ function loadBalloonGame() {
           height: 78px !important;
         }
       }
+      /* Fullscreen play area */
+      #balloon-area.balloon-fullscreen {
+        position: fixed !important;
+        inset: 0 !important;
+        width: 100vw !important;
+        height: 100dvh !important;
+        z-index: 9999 !important;
+        border-radius: 0 !important;
+        margin: 0 !important;
+      }
+      #fs-btn {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        z-index: 10001;
+        background: rgba(0,0,0,0.45);
+        color: #fff;
+        border: none;
+        border-radius: 10px;
+        padding: 7px 14px;
+        font-size: 1rem;
+        font-family: 'Nunito', Arial, sans-serif;
+        font-weight: 700;
+        cursor: pointer;
+        backdrop-filter: blur(4px);
+        transition: background 0.2s;
+        line-height: 1.3;
+      }
+      #fs-btn:hover { background: rgba(0,0,0,0.65); }
+      #fs-score-overlay {
+        display: none;
+        position: absolute;
+        top: 10px;
+        left: 12px;
+        z-index: 10001;
+        background: rgba(0,0,0,0.4);
+        color: #fff;
+        border-radius: 10px;
+        padding: 5px 16px;
+        font-size: 1.2rem;
+        font-weight: 700;
+        font-family: 'Nunito', Arial, sans-serif;
+        backdrop-filter: blur(4px);
+        pointer-events: none;
+      }
+      #balloon-area.balloon-fullscreen #fs-score-overlay {
+        display: block;
+      }
     </style>
     <h2>Balloon Pop Game</h2>
     <p class="instruction">Tap or type letters to pop balloons.</p>
@@ -594,6 +676,8 @@ function loadBalloonGame() {
     </div>
     <button class="start-btn" onclick="startBalloonGame()">Start Game</button>
     <div id="balloon-area" style="position: relative; background: linear-gradient(to bottom, #00BFFF 0%, #FFD700 50%, #32CD32 100%); border-radius: 10px; overflow: hidden;">
+      <button id="fs-btn" onclick="toggleBalloonFullscreen()">⛶ Full Screen</button>
+      <div id="fs-score-overlay">Score: 0</div>
       <!-- Balloons will be added here -->
     </div>
     <div id="score">Score: 0</div>
@@ -607,10 +691,15 @@ function startBalloonGame() {
   playStartMusic();
 
   const balloonArea = document.getElementById('balloon-area');
-  balloonArea.innerHTML = ''; // Clear any existing balloons
+  // Remove only balloons/confetti, preserve fullscreen UI elements
+  [...balloonArea.children].forEach(child => {
+    if (child.id !== 'fs-btn' && child.id !== 'fs-score-overlay') child.remove();
+  });
   currentScore = 0;
   scoreDisplay = document.getElementById('score');
   scoreDisplay.textContent = 'Score: 0';
+  const fsScoreEl = document.getElementById('fs-score-overlay');
+  if (fsScoreEl) fsScoreEl.textContent = 'Score: 0';
 
   // Build a pool where each letter appears at most twice, then shuffle
   const alphabet = (isUppercase ? 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' : 'abcdefghijklmnopqrstuvwxyz').split('');
@@ -676,52 +765,56 @@ function speakLetter(letter) {
 function playStartMusic() {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    // Cheerful ascending arpeggio: C5 E5 G5 C6
-    const notes = [523, 659, 784, 1047];
-    notes.forEach((freq, i) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.type = 'sine';
-      osc.frequency.value = freq;
-      const start = ctx.currentTime + i * 0.15;
-      gain.gain.setValueAtTime(0, start);
-      gain.gain.linearRampToValueAtTime(0.28, start + 0.04);
-      gain.gain.linearRampToValueAtTime(0, start + 0.22);
-      osc.start(start);
-      osc.stop(start + 0.3);
-    });
+    ctx.resume().then(() => {
+      // Cheerful ascending arpeggio: C5 E5 G5 C6
+      const notes = [523, 659, 784, 1047];
+      notes.forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        const start = ctx.currentTime + i * 0.15;
+        gain.gain.setValueAtTime(0, start);
+        gain.gain.linearRampToValueAtTime(0.28, start + 0.04);
+        gain.gain.linearRampToValueAtTime(0, start + 0.22);
+        osc.start(start);
+        osc.stop(start + 0.3);
+      });
+    }).catch(() => {});
   } catch(e) {}
 }
 
 function playVictoryMusic() {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    // Victory fanfare melody
-    const melody = [
-      [523, 0.00, 0.12],
-      [523, 0.13, 0.12],
-      [523, 0.26, 0.12],
-      [659, 0.38, 0.25],
-      [784, 0.64, 0.50],
-      [698, 0.90, 0.12],
-      [784, 1.03, 0.70]
-    ];
-    melody.forEach(([freq, when, dur]) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.type = 'triangle';
-      osc.frequency.value = freq;
-      const start = ctx.currentTime + when;
-      gain.gain.setValueAtTime(0, start);
-      gain.gain.linearRampToValueAtTime(0.32, start + 0.04);
-      gain.gain.linearRampToValueAtTime(0, start + dur);
-      osc.start(start);
-      osc.stop(start + dur + 0.05);
-    });
+    ctx.resume().then(() => {
+      // Victory fanfare melody
+      const melody = [
+        [523, 0.00, 0.12],
+        [523, 0.13, 0.12],
+        [523, 0.26, 0.12],
+        [659, 0.38, 0.25],
+        [784, 0.64, 0.50],
+        [698, 0.90, 0.12],
+        [784, 1.03, 0.70]
+      ];
+      melody.forEach(([freq, when, dur]) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'triangle';
+        osc.frequency.value = freq;
+        const start = ctx.currentTime + when;
+        gain.gain.setValueAtTime(0, start);
+        gain.gain.linearRampToValueAtTime(0.32, start + 0.04);
+        gain.gain.linearRampToValueAtTime(0, start + dur);
+        osc.start(start);
+        osc.stop(start + dur + 0.05);
+      });
+    }).catch(() => {});
   } catch(e) {}
 }
 
@@ -832,6 +925,20 @@ function openObjectEditor() {
   }
 }
 
+function toggleBalloonFullscreen() {
+  const area = document.getElementById('balloon-area');
+  const btn = document.getElementById('fs-btn');
+  if (!area) return;
+  const isFullscreen = area.classList.toggle('balloon-fullscreen');
+  if (btn) btn.textContent = isFullscreen ? '✕ Exit Full Screen' : '⛶ Full Screen';
+  // Sync score overlay with current score
+  const score = document.getElementById('score');
+  const fsScore = document.getElementById('fs-score-overlay');
+  if (fsScore && score) fsScore.textContent = score.textContent;
+  // Reflow balloons after browser repaints the new size
+  setTimeout(repositionBalloons, 80);
+}
+
 
   // Function to create a balloon
   function createBalloon(letter, balloonArea) {
@@ -915,6 +1022,8 @@ function openObjectEditor() {
     // Update score
     currentScore++;
     if (scoreDisplay) scoreDisplay.textContent = 'Score: ' + currentScore;
+    const fsScoreEl = document.getElementById('fs-score-overlay');
+    if (fsScoreEl) fsScoreEl.textContent = 'Score: ' + currentScore;
 
     // Random blast effect
     const blastTypes = ['scale-blast', 'rotate-blast', 'burst-blast'];
@@ -936,9 +1045,11 @@ function openObjectEditor() {
         msg.innerHTML = '<h3 style="font-size:2rem;color:#fff;text-shadow:2px 2px 10px #333,0 0 30px rgba(0,0,0,0.5);margin-bottom:16px;">🎉 All balloons popped! 🎉</h3>';
         area.appendChild(msg);
         const playAgainBtn = document.createElement('button');
-        playAgainBtn.className = 'start-btn';
-        playAgainBtn.textContent = 'Play Again';
+        playAgainBtn.className = 'start-btn play-again-pulse';
+        playAgainBtn.textContent = '🎈 Play Again 🎈';
         playAgainBtn.style.pointerEvents = 'all';
+        playAgainBtn.style.fontSize = '1.5rem';
+        playAgainBtn.style.marginTop = '8px';
         playAgainBtn.onclick = startBalloonGame;
         msg.appendChild(playAgainBtn);
         stopBgMusic(800);
