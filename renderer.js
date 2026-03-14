@@ -468,7 +468,12 @@ function loadBalloonGame() {
   screen.innerHTML = `
     <style>
       .balloon {
-        transition: all 0.3s ease;
+        transition: transform 0.3s ease, opacity 0.3s ease;
+        width: 80px;
+        height: 120px;
+      }
+      #balloon-area {
+        height: clamp(220px, 42vh, 420px);
       }
       #pause-overlay {
         display: none;
@@ -549,12 +554,9 @@ function loadBalloonGame() {
       }
       /* Responsive */
       @media (max-width: 768px) {
-        #balloon-area {
-          height: 300px !important;
-        }
         .balloon {
-          width: 60px !important;
-          height: 90px !important;
+          width: 65px !important;
+          height: 97px !important;
         }
         .start-btn {
           font-size: 20px;
@@ -562,16 +564,23 @@ function loadBalloonGame() {
         }
       }
       @media (max-width: 480px) {
-        #balloon-area {
-          height: 250px !important;
-        }
         .balloon {
-          width: 50px !important;
-          height: 75px !important;
+          width: 55px !important;
+          height: 82px !important;
         }
         .start-btn {
           font-size: 18px;
           padding: 12px 24px;
+        }
+      }
+      /* Landscape on small-screen devices — shrink area height and balloons */
+      @media (orientation: landscape) and (max-height: 520px) {
+        #balloon-area {
+          height: clamp(160px, 54vh, 280px) !important;
+        }
+        .balloon {
+          width: 52px !important;
+          height: 78px !important;
         }
       }
     </style>
@@ -584,7 +593,7 @@ function loadBalloonGame() {
       <button class="start-btn" style="margin-left: 12px;" onclick="openObjectEditor()">Edit Objects</button>
     </div>
     <button class="start-btn" onclick="startBalloonGame()">Start Game</button>
-    <div id="balloon-area" style="position: relative; height: 400px; background: linear-gradient(to bottom, #00BFFF 0%, #FFD700 50%, #32CD32 100%); border-radius: 10px; overflow: hidden;">
+    <div id="balloon-area" style="position: relative; background: linear-gradient(to bottom, #00BFFF 0%, #FFD700 50%, #32CD32 100%); border-radius: 10px; overflow: hidden;">
       <!-- Balloons will be added here -->
     </div>
     <div id="score">Score: 0</div>
@@ -592,8 +601,9 @@ function loadBalloonGame() {
 }
 
 function startBalloonGame() {
-  // Remove previous listener
+  // Remove previous listeners
   document.removeEventListener('keydown', handleKeyPress);
+  window.removeEventListener('resize', repositionBalloons);
   playStartMusic();
 
   const balloonArea = document.getElementById('balloon-area');
@@ -618,8 +628,9 @@ function startBalloonGame() {
     currentBalloons.push(balloon);
   }
 
-  // Add keyboard listener
+  // Add keyboard listener and resize handler for orientation changes
   document.addEventListener('keydown', handleKeyPress);
+  window.addEventListener('resize', repositionBalloons);
 }
 
 function pauseGameFor(seconds, message) {
@@ -832,11 +843,19 @@ function openObjectEditor() {
     container.className = 'balloon';
     container.dataset.letter = letter;
     container.style.position = 'absolute';
-    container.style.width = '80px';
-    container.style.height = '120px';
     container.style.cursor = 'pointer';
-    container.style.left = Math.random() * (balloonArea.offsetWidth - 80) + 'px';
-    container.style.top = Math.random() * (balloonArea.offsetHeight - 120) + 'px';
+    // Use percentage positioning so balloons reflow when the area resizes (orientation change)
+    const areaW = balloonArea.offsetWidth || 300;
+    const areaH = balloonArea.offsetHeight || 280;
+    // Estimate current CSS balloon size via breakpoint
+    const bW = window.innerWidth <= 480 ? 55 : window.innerWidth <= 768 ? 65 : 80;
+    const bH = bW * 1.5;
+    const xPct = Math.random() * Math.max(0, (areaW - bW) / areaW * 100);
+    const yPct = Math.random() * Math.max(0, (areaH - bH) / areaH * 100);
+    container.dataset.xPct = xPct;
+    container.dataset.yPct = yPct;
+    container.style.left = xPct + '%';
+    container.style.top = yPct + '%';
 
     container.innerHTML = `
       <svg width="100%" height="100%" viewBox="0 0 80 120" xmlns="http://www.w3.org/2000/svg">
@@ -863,6 +882,28 @@ function openObjectEditor() {
     return container;
   }
 
+  // Reposition all active balloons within current area bounds (called on resize/orientation change)
+  function repositionBalloons() {
+    const area = document.getElementById('balloon-area');
+    if (!area || currentBalloons.length === 0) return;
+    const areaW = area.offsetWidth;
+    const areaH = area.offsetHeight;
+    currentBalloons.forEach(b => {
+      const bW = b.offsetWidth || 70;
+      const bH = b.offsetHeight || 105;
+      let xPct = parseFloat(b.dataset.xPct) || 0;
+      let yPct = parseFloat(b.dataset.yPct) || 0;
+      const maxXPct = Math.max(0, (areaW - bW) / areaW * 100);
+      const maxYPct = Math.max(0, (areaH - bH) / areaH * 100);
+      xPct = Math.min(xPct, maxXPct);
+      yPct = Math.min(yPct, maxYPct);
+      b.dataset.xPct = xPct;
+      b.dataset.yPct = yPct;
+      b.style.left = xPct + '%';
+      b.style.top = yPct + '%';
+    });
+  }
+
   // Function to pop balloon
   function popBalloon(balloon, letter) {
     if (isPaused) return;
@@ -886,6 +927,7 @@ function openObjectEditor() {
       currentBalloons = currentBalloons.filter(b => b !== balloon);
       if (currentBalloons.length === 0) {
         document.removeEventListener('keydown', handleKeyPress);
+        window.removeEventListener('resize', repositionBalloons);
         const area = document.getElementById('balloon-area');
         area.innerHTML = '';
         throwBigConfetti();
