@@ -323,6 +323,8 @@ const letterWordPool = {
 let letterObjects = { ...defaultLetterObjects };
 let useObjectWords = true;
 let randomizeObjects = false;
+let autoRespawnEnabled = false;
+let autoRespawnTimeoutId = null;
 
 // Keyboard handler
 function handleKeyPress(event) {
@@ -338,6 +340,7 @@ function handleKeyPress(event) {
 
 // Load the home screen tiles
 function loadHome() {
+  clearAutoRespawnTimeout();
   stopBgMusic(600);
   // Ensure keyboard listener is removed
   document.removeEventListener('keydown', handleKeyPress);
@@ -414,6 +417,7 @@ function loadHome() {
 
 // Game loading function
 function loadGame(gameName) {
+  clearAutoRespawnTimeout();
   startBgMusic();
   gameContainer.innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px;">
@@ -672,6 +676,7 @@ function loadBalloonGame() {
     <div style="margin-bottom: 10px;">
       <label style="margin-right: 16px;"><input type="checkbox" id="case-toggle" ${isUppercase ? 'checked' : ''} onchange="toggleCase()"> Uppercase Letters</label>
       <label style="margin-right: 16px;"><input type="checkbox" id="object-toggle" ${useObjectWords ? 'checked' : ''} onchange="toggleObjectWords()"> Say object (e.g., Z for Zebra)</label>
+      <label style="margin-right: 16px;"><input type="checkbox" id="auto-respawn-toggle" ${autoRespawnEnabled ? 'checked' : ''} onchange="toggleAutoRespawn(this.checked)"> Auto respawn when done</label>
       <label><input type="checkbox" id="randomize-toggle" ${randomizeObjects ? 'checked' : ''} onchange="toggleRandomizeObjects()"> Random objects</label>
       <button class="start-btn" style="margin-left: 12px;" onclick="openObjectEditor()">Edit Objects</button>
     </div>
@@ -686,6 +691,7 @@ function loadBalloonGame() {
 }
 
 function startBalloonGame() {
+  clearAutoRespawnTimeout();
   // Remove previous listeners
   document.removeEventListener('keydown', handleKeyPress);
   window.removeEventListener('resize', repositionBalloons);
@@ -915,6 +921,17 @@ function toggleRandomizeObjects() {
   randomizeObjects = !randomizeObjects;
 }
 
+function toggleAutoRespawn(enabled) {
+  autoRespawnEnabled = Boolean(enabled);
+}
+
+function clearAutoRespawnTimeout() {
+  if (autoRespawnTimeoutId) {
+    clearTimeout(autoRespawnTimeoutId);
+    autoRespawnTimeoutId = null;
+  }
+}
+
 function openObjectEditor() {
   const letter = prompt('Enter letter to edit (A-Z):');
   if (!letter || letter.length !== 1) return;
@@ -1067,6 +1084,9 @@ function toggleBalloonFullscreen() {
         playAgainBtn.style.marginTop = '8px';
         playAgainBtn.onclick = startBalloonGame;
         msg.appendChild(playAgainBtn);
+        if (autoRespawnEnabled) {
+          autoRespawnTimeoutId = setTimeout(startBalloonGame, 1400);
+        }
         stopBgMusic(800);
         playVictoryMusic();
         setTimeout(() => {
@@ -1210,6 +1230,9 @@ function loadShapesGame() {
       <p>Tap any shape. After 2 seconds, the game says its name.</p>
       <button class="shape-start-btn" onclick="startShapesGame()">Start SHAPES</button>
       <button id="shapes-replay-btn" class="shape-replay-btn" onclick="startShapesGame()">Play Again</button>
+      <div style="margin-bottom: 12px; font-size:0.95rem; color:#333;">
+        <label><input type="checkbox" id="auto-respawn-toggle" ${autoRespawnEnabled ? 'checked' : ''} onchange="toggleAutoRespawn(this.checked)"> Auto respawn when all shapes are tapped</label>
+      </div>
       <div class="shapes-meta">
         <span id="shapes-score">Score: 0</span>
         <span id="shapes-round">Clicks: 0</span>
@@ -1222,6 +1245,7 @@ function loadShapesGame() {
 }
 
 function startShapesGame() {
+  clearAutoRespawnTimeout();
   shapesScore = 0;
   shapesRound = 0;
   isShapeSpeakPending = false;
@@ -1332,11 +1356,17 @@ function isShapesGameOver() {
 }
 
 function finishShapesGame() {
+  clearAutoRespawnTimeout();
   const targetEl = document.getElementById('shapes-target');
   if (targetEl) {
     targetEl.textContent = 'All done. Great job!';
   }
-  setShapesStatus('Press Play Again for new shapes.');
+  if (autoRespawnEnabled) {
+    setShapesStatus('Auto respawn enabled — new shapes will appear soon.');
+    autoRespawnTimeoutId = setTimeout(startShapesGame, 1400);
+  } else {
+    setShapesStatus('Press Play Again for new shapes.');
+  }
   toggleShapesReplay(true);
 }
 
