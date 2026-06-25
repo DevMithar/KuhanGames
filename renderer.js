@@ -326,6 +326,32 @@ let randomizeObjects = false;
 let autoRespawnEnabled = false;
 let autoRespawnTimeoutId = null;
 
+const PHONICS_SOUNDS = {
+  A: 'ah', B: 'buh', C: 'kuh', D: 'duh', E: 'eh', F: 'fuh', G: 'guh', H: 'huh',
+  I: 'ih', J: 'juh', K: 'kuh', L: 'luh', M: 'muh', N: 'nuh', O: 'oh', P: 'puh',
+  Q: 'kwuh', R: 'ruh', S: 'sss', T: 'tuh', U: 'uh', V: 'vuh', W: 'wuh', X: 'ks', Y: 'yuh', Z: 'zuh'
+};
+
+const WORD_BUILDER_WORDS = [
+  { word: 'egg', label: 'Egg', icon: '🥚', hint: 'A round breakfast food' },
+  { word: 'cat', label: 'Cat', icon: '🐱', hint: 'A soft furry pet' },
+  { word: 'sun', label: 'Sun', icon: '☀️', hint: 'A bright yellow star' },
+  { word: 'dog', label: 'Dog', icon: '🐶', hint: 'A friendly pet' },
+  { word: 'hat', label: 'Hat', icon: '🎩', hint: 'Something you wear on your head' },
+  { word: 'pig', label: 'Pig', icon: '🐷', hint: 'A pink farm animal' },
+  { word: 'bus', label: 'Bus', icon: '🚌', hint: 'A vehicle that carries people' },
+  { word: 'fox', label: 'Fox', icon: '🦊', hint: 'A clever wild animal' }
+];
+
+let wordBuilderOrder = [];
+let wordBuilderIndex = 0;
+let wordBuilderScore = 0;
+let wordBuilderFormed = [];
+let wordBuilderNextLetter = 0;
+let wordBuilderPlaying = false;
+let wordBuilderAutoAdvance = false;
+let wordBuilderPendingNext = false;
+
 // Keyboard handler
 function handleKeyPress(event) {
   if (isPaused) return;
@@ -342,8 +368,9 @@ function handleKeyPress(event) {
 function loadHome() {
   clearAutoRespawnTimeout();
   stopBgMusic(600);
-  // Ensure keyboard listener is removed
+  // Ensure keyboard listeners are removed
   document.removeEventListener('keydown', handleKeyPress);
+  document.removeEventListener('keydown', handleWordBuilderKeyDown);
 
   gameContainer.innerHTML = `
     <style>
@@ -1113,13 +1140,474 @@ function loadColorGame() {
 }
 
 function loadWordGame() {
-  document.getElementById('game-screen').innerHTML = `
-    <h2>Word Builder Game</h2>
-    <p>Build words by dragging letters! (Coming soon)</p>
-    <div id="word-area" style="height: 300px; background: white; border-radius: 10px; display: flex; justify-content: center; align-items: center;">
-      <p>Word building interface will be here</p>
+  const screen = document.getElementById('game-screen');
+  screen.innerHTML = `
+    <style>
+      .word-builder-wrap {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 18px;
+        background: radial-gradient(circle at top left, #ffb3d9 0%, #ffefc7 35%, #c8f1ff 75%, #e8f9ff 100%);
+        border-radius: 30px;
+        box-shadow: 0 20px 40px rgba(0,0,0,0.12);
+      }
+      .word-builder-panel {
+        display: grid;
+        gap: 16px;
+        text-align: center;
+      }
+      .word-builder-card {
+        display: grid;
+        gap: 12px;
+        background: linear-gradient(180deg, rgba(255,255,255,0.88) 0%, rgba(255,255,255,0.75) 100%);
+        border: 2px solid rgba(255,255,255,0.9);
+        border-radius: 24px;
+        padding: 18px;
+        box-shadow: 0 12px 30px rgba(0,0,0,0.12);
+      }
+      .word-builder-preview {
+        display: flex;
+        justify-content: center;
+        gap: 14px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .word-builder-icon {
+        font-size: 4.2rem;
+      }
+      .word-builder-hint {
+        display: none;
+      }
+      .word-builder-controls {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 10px;
+      }
+      .word-builder-tiles {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+        gap: 16px;
+        margin-top: 0;
+        justify-items: center;
+      }
+      .word-tile {
+        position: relative;
+        width: 110px;
+        height: 130px;
+        background: radial-gradient(circle at 35% 28%, #ffffff 12%, rgba(255,255,255,0.9) 20%, rgba(255,255,255,0.55) 36%, #ffeb92 52%, #ffb94e 72%, #ff8c6b 100%);
+        border: 4px solid rgba(255,255,255,0.95);
+        border-radius: 50%;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        font-size: 2.6rem;
+        font-weight: 900;
+        color: #222;
+        cursor: pointer;
+        transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+        box-shadow: inset 0 10px 22px rgba(255,255,255,0.8), 0 18px 30px rgba(0,0,0,0.17);
+      }
+      .word-tile::before {
+        content: '';
+        position: absolute;
+        width: 56px;
+        height: 42px;
+        top: 18px;
+        left: 20px;
+        background: rgba(255,255,255,0.75);
+        border-radius: 40px 40px 30px 30px;
+        transform: rotate(-20deg);
+        filter: blur(0.5px);
+      }
+      .word-tile::after {
+        content: '';
+        position: absolute;
+        width: 18px;
+        height: 24px;
+        background: rgba(255,255,255,0.95);
+        border-radius: 10px 10px 6px 6px;
+        bottom: -18px;
+        left: 50%;
+        transform: translateX(-50%);
+        box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
+      }
+      .word-tile::before,
+      .word-tile::after {
+        pointer-events: none;
+      }
+      .word-tile:hover:not(:disabled) {
+        transform: translateY(-3px);
+        box-shadow: 0 12px 22px rgba(0,0,0,0.18);
+      }
+      .word-tile:disabled {
+        opacity: 0.35;
+        cursor: default;
+        transform: none;
+      }
+      .word-target {
+        min-height: 0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        background: transparent;
+        border: none;
+        border-radius: 18px;
+        padding: 0;
+        font-size: 1.4rem;
+        font-weight: 800;
+        color: #1750a3;
+      }
+      .word-status {
+        color: #2e2e2e;
+        font-size: 1.05rem;
+        min-height: 24px;
+        font-weight: 700;
+      }
+      .word-builder-score {
+        font-size: 1.2rem;
+        font-weight: 700;
+        color: #333;
+      }
+      .word-builder-action {
+        font-size: 18px;
+        padding: 12px 22px;
+        border-radius: 14px;
+        border: none;
+        cursor: pointer;
+        font-weight: 800;
+        color: #222;
+        background: linear-gradient(45deg, #4ec7f3, #6b70ff);
+        box-shadow: 0 10px 18px rgba(0,0,0,0.18);
+      }
+      .word-builder-action:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+      .word-builder-auto-next {
+        margin-top: 12px;
+        font-size: 0.95rem;
+        color: #2e2e2e;
+      }
+      .word-builder-auto-next label {
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+      @media (max-width: 520px) {
+        .word-builder-icon {
+          font-size: 3.2rem;
+        }
+        .word-tile {
+          min-height: 66px;
+          font-size: 1.9rem;
+        }
+      }
+    </style>
+    <div class="word-builder-wrap">
+      <h2>Word Builder</h2>
+      <p class="instruction">Tap or type the letters in the colorful balloons.</p>
+      <div class="word-builder-panel">
+        <div class="word-builder-card">
+          <div class="word-builder-preview">
+            <div id="word-builder-icon" class="word-builder-icon">🥚</div>
+            <div>
+              <div id="word-builder-label" style="font-size:1.6rem;font-weight:800;color:#222;">Egg</div>
+              <div id="word-builder-hint" class="word-builder-hint"></div>
+            </div>
+          </div>
+          <div id="word-builder-tiles" class="word-builder-tiles"></div>
+          <div id="word-builder-answer" class="word-target"></div>
+          <div class="word-builder-controls">
+            <button id="word-builder-action" class="word-builder-action" onclick="handleWordBuilderAction()">Start Word Builder</button>
+          </div>
+          <div class="word-builder-auto-next">
+            <label><input id="word-builder-auto-next" type="checkbox" onchange="setWordBuilderAutoAdvance(this.checked)"> Auto next word on completion</label>
+          </div>
+          <div id="word-builder-status" class="word-status"></div>
+        </div>
+        <div class="word-builder-card" style="background: linear-gradient(180deg, #e2f4ff 0%, #f2fbff 100%);">
+          <div class="word-builder-score" id="word-builder-score">Score: 0</div>
+        </div>
+      </div>
     </div>
   `;
+}
+
+function handleWordBuilderAction() {
+  const button = document.getElementById('word-builder-action');
+  if (!button) return;
+  const label = button.textContent.trim();
+
+  if (label === 'Start Word Builder' || label === 'Play Again') {
+    wordBuilderOrder = WORD_BUILDER_WORDS.map((_, index) => index);
+    wordBuilderIndex = 0;
+    wordBuilderScore = 0;
+    wordBuilderPlaying = true;
+    wordBuilderFormed = [];
+    wordBuilderNextLetter = 0;
+    wordBuilderPendingNext = false;
+    updateWordBuilderScore();
+    loadWordBuilderWord();
+    document.removeEventListener('keydown', handleWordBuilderKeyDown);
+    document.addEventListener('keydown', handleWordBuilderKeyDown);
+    return;
+  }
+
+  if (label === 'Next Word') {
+    if (wordBuilderIndex + 1 < WORD_BUILDER_WORDS.length) {
+      wordBuilderIndex += 1;
+      wordBuilderPlaying = true;
+      wordBuilderFormed = [];
+      wordBuilderNextLetter = 0;
+      wordBuilderPendingNext = false;
+      updateWordBuilderActionButton('Next Word', false);
+      loadWordBuilderWord();
+      document.removeEventListener('keydown', handleWordBuilderKeyDown);
+      document.addEventListener('keydown', handleWordBuilderKeyDown);
+    } else {
+      wordBuilderOrder = WORD_BUILDER_WORDS.map((_, index) => index);
+      wordBuilderIndex = 0;
+      wordBuilderScore = 0;
+      wordBuilderPlaying = true;
+      wordBuilderFormed = [];
+      wordBuilderNextLetter = 0;
+      wordBuilderPendingNext = false;
+      updateWordBuilderScore();
+      loadWordBuilderWord();
+      document.removeEventListener('keydown', handleWordBuilderKeyDown);
+      document.addEventListener('keydown', handleWordBuilderKeyDown);
+    }
+    return;
+  }
+}
+
+function startWordBuilderGame() {
+  handleWordBuilderAction();
+}
+
+function loadWordBuilderWord() {
+  clearWordBuilder();
+  const entry = WORD_BUILDER_WORDS[wordBuilderOrder[wordBuilderIndex]];
+  const icon = document.getElementById('word-builder-icon');
+  const label = document.getElementById('word-builder-label');
+  const hint = document.getElementById('word-builder-hint');
+  const status = document.getElementById('word-builder-status');
+  if (icon) icon.textContent = entry.icon;
+  if (label) label.textContent = entry.label;
+  if (hint) hint.textContent = '';
+  if (status) status.textContent = '';
+  renderWordBuilderTiles(entry.word);
+}
+
+function renderWordBuilderTiles(word) {
+  const tileArea = document.getElementById('word-builder-tiles');
+  const answer = document.getElementById('word-builder-answer');
+  if (!tileArea || !answer) return;
+  tileArea.innerHTML = '';
+  answer.textContent = '';
+  wordBuilderFormed = [];
+  wordBuilderNextLetter = 0;
+
+  const letters = word.toUpperCase().split('');
+  const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F'];
+
+  letters.forEach((letter, index) => {
+    const button = document.createElement('button');
+    button.className = 'word-tile';
+    button.textContent = letter;
+    button.id = `word-builder-tile-${index}`;
+    button.disabled = index !== 0;
+    button.style.background = `radial-gradient(circle at 30% 25%, #ffffff 15%, ${colors[index % colors.length]} 55%, ${colors[(index + 1) % colors.length]} 100%)`;
+    if (index !== 0) {
+      button.style.opacity = '0.45';
+    }
+    button.onclick = () => handleWordTileTap(letter, index);
+    tileArea.appendChild(button);
+  });
+}
+
+function handleWordTileTap(letter, index) {
+  if (!wordBuilderPlaying) return;
+  const expectedIndex = wordBuilderNextLetter;
+  if (index !== expectedIndex) return;
+  const tile = document.getElementById(`word-builder-tile-${index}`);
+  if (!tile || tile.disabled) return;
+  tile.disabled = true;
+  tile.style.opacity = '0.45';
+  wordBuilderFormed.push(letter);
+  updateWordBuilderAnswerDisplay();
+  speakLetterSound(letter);
+  wordBuilderNextLetter += 1;
+
+  const entry = WORD_BUILDER_WORDS[wordBuilderOrder[wordBuilderIndex]];
+  if (wordBuilderNextLetter < entry.word.length) {
+    const nextTile = document.getElementById(`word-builder-tile-${wordBuilderNextLetter}`);
+    if (nextTile) {
+      nextTile.disabled = false;
+      nextTile.style.opacity = '1';
+    }
+  }
+  if (wordBuilderFormed.length >= entry.word.length) {
+    setTimeout(() => {
+      speakSpelledWord(entry.word, entry.label);
+      checkWordBuilderAnswer();
+    }, 600);
+  }
+}
+
+function handleWordBuilderKeyDown(event) {
+  if (!wordBuilderPlaying) return;
+  const key = event.key.toUpperCase();
+  const entry = WORD_BUILDER_WORDS[wordBuilderOrder[wordBuilderIndex]];
+  const expectedLetter = entry.word.toUpperCase().charAt(wordBuilderNextLetter);
+  if (key === expectedLetter) {
+    event.preventDefault();
+    handleWordTileTap(expectedLetter, wordBuilderNextLetter);
+  }
+}
+
+function updateWordBuilderAnswerDisplay() {
+  const answer = document.getElementById('word-builder-answer');
+  if (!answer) return;
+  answer.textContent = '';
+}
+
+function updateWordBuilderActionButton(text, enabled, visible = true) {
+  const button = document.getElementById('word-builder-action');
+  if (!button) return;
+  button.textContent = text;
+  button.disabled = !enabled && wordBuilderPlaying;
+  button.style.display = visible ? '' : 'none';
+}
+
+function setWordBuilderAutoAdvance(enabled) {
+  wordBuilderAutoAdvance = !!enabled;
+  const button = document.getElementById('word-builder-action');
+  if (!button) return;
+  if (wordBuilderAutoAdvance && button.textContent.trim() === 'Next Word') {
+    button.style.display = 'none';
+  } else {
+    button.style.display = '';
+  }
+}
+
+function checkWordBuilderAnswer() {
+  const entry = WORD_BUILDER_WORDS[wordBuilderOrder[wordBuilderIndex]];
+  const answer = wordBuilderFormed.join('');
+  const status = document.getElementById('word-builder-status');
+  if (answer === entry.word.toUpperCase()) {
+    wordBuilderScore += 1;
+    updateWordBuilderScore();
+    if (status) status.textContent = '';
+    playVictoryMusic();
+    speakText(`Yes! ${entry.label} is spelled ${entry.word.toUpperCase()}.`, accessibilitySettings.speechRate, accessibilitySettings.volume);
+    if (wordBuilderIndex + 1 < WORD_BUILDER_WORDS.length) {
+      updateWordBuilderActionButton('Next Word', true, !wordBuilderAutoAdvance);
+      if (wordBuilderAutoAdvance) {
+        setTimeout(() => {
+          if (wordBuilderAutoAdvance && !wordBuilderPlaying) {
+            advanceWordBuilder();
+          }
+        }, 900);
+      }
+    } else {
+      updateWordBuilderActionButton('Play Again', true, true);
+    }
+    wordBuilderPlaying = false;
+    wordBuilderPendingNext = true;
+  } else {
+    if (status) status.textContent = '';
+    resetWordTiles();
+  }
+}
+
+function advanceWordBuilder() {
+  wordBuilderIndex += 1;
+  if (wordBuilderIndex >= WORD_BUILDER_WORDS.length) {
+    wordBuilderPlaying = false;
+    const status = document.getElementById('word-builder-status');
+    if (status) status.textContent = '';
+    document.getElementById('word-builder-answer').textContent = 'Great work!';
+    updateWordBuilderActionButton('Play Again', true);
+    document.removeEventListener('keydown', handleWordBuilderKeyDown);
+    return;
+  }
+  wordBuilderPlaying = true;
+  wordBuilderFormed = [];
+  wordBuilderNextLetter = 0;
+  loadWordBuilderWord();
+  document.removeEventListener('keydown', handleWordBuilderKeyDown);
+  document.addEventListener('keydown', handleWordBuilderKeyDown);
+}
+
+function clearWordBuilder() {
+  wordBuilderFormed = [];
+  wordBuilderNextLetter = 0;
+  updateWordBuilderAnswerDisplay();
+  const tileArea = document.getElementById('word-builder-tiles');
+  if (!tileArea) return;
+  Array.from(tileArea.children).forEach((child, index) => {
+    if (child.tagName === 'BUTTON') {
+      child.disabled = index !== 0;
+      child.style.opacity = index === 0 ? '1' : '0.45';
+    }
+  });
+  const status = document.getElementById('word-builder-status');
+  if (status && wordBuilderPlaying) status.textContent = '';
+}
+
+function resetWordTiles() {
+  wordBuilderFormed = [];
+  updateWordBuilderAnswerDisplay();
+  const entry = WORD_BUILDER_WORDS[wordBuilderOrder[wordBuilderIndex]];
+  renderWordBuilderTiles(entry.word);
+}
+
+function updateWordBuilderScore() {
+  const score = document.getElementById('word-builder-score');
+  if (score) score.textContent = `Score: ${wordBuilderScore}`;
+}
+
+function speakLetterSound(letter) {
+  const sound = PHONICS_SOUNDS[letter] || letter.toLowerCase();
+  speakText(`${letter} says ${sound}`, accessibilitySettings.speechRate, accessibilitySettings.volume);
+}
+
+function speakWord(word, label) {
+  const parts = word.toUpperCase().split('').map((ch) => {
+    const sound = PHONICS_SOUNDS[ch] || ch.toLowerCase();
+    return `${ch} says ${sound}`;
+  });
+  speakText(`Let us spell ${label}. ${parts.join(', ')}. The word is ${word}.`, accessibilitySettings.speechRate, accessibilitySettings.volume);
+}
+
+function speakSpelledWord(word, label) {
+  const spaced = word.toUpperCase().split('').join(' ');
+  // Slow down the completed word reading for clearer letter-by-letter spelling.
+  speakText(`${spaced}. ${label}.`, accessibilitySettings.speechRate * 0.7, accessibilitySettings.volume);
+}
+
+function sayCurrentWord() {
+  if (!wordBuilderPlaying) {
+    const entry = WORD_BUILDER_WORDS[wordBuilderOrder[wordBuilderIndex] || 0];
+    speakWord(entry.word, entry.label);
+    return;
+  }
+  const entry = WORD_BUILDER_WORDS[wordBuilderOrder[wordBuilderIndex]];
+  speakWord(entry.word, entry.label);
+}
+
+function showPhonicsHelp() {
+  const entry = WORD_BUILDER_WORDS[wordBuilderOrder[wordBuilderIndex]];
+  if (!entry) return;
+  const phonics = entry.word.toUpperCase().split('').map((ch) => {
+    return `${ch} is ${PHONICS_SOUNDS[ch] || ch.toLowerCase()}`;
+  }).join(', ');
+  speakText(`Here is the phonics help for ${entry.label}: ${phonics}.`, accessibilitySettings.speechRate, accessibilitySettings.volume);
 }
 
 function loadShapesGame() {
