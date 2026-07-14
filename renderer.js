@@ -180,9 +180,19 @@ function scheduleBgLoop() {
 // ────────────────────────────────────────────────────────────────────────────
 
 // ── Voice Selection ───────────────────────────────────────────────────────────
-// Ranked preference list: first match wins
-const FEMALE_VOICE_PRIORITY = [
-  'Samantha',       // macOS / iOS – warm, natural
+// Ranked preference list: first match wins.
+const PREFERRED_VOICE_PRIORITY = [
+  'Alex',           // macOS – natural male voice
+  'Daniel',         // macOS
+  'Fred',           // macOS
+  'John',           // common Windows/Chrome male voice
+  'David',          // common Windows voice
+  'Microsoft David',
+  'Google US English',
+  'Google UK English Male',
+  'en-US-Neural2-C',// Chrome neural
+  'en-US-Wavenet-C',
+  'Samantha',       // macOS / iOS – warm female fallback
   'Karen',          // macOS Australian
   'Moira',          // macOS Irish
   'Tessa',          // macOS South African
@@ -191,46 +201,134 @@ const FEMALE_VOICE_PRIORITY = [
   'Victoria',       // macOS
   'Zira',           // Windows – Microsoft Zira
   'Microsoft Zira',
-  'Google US English',
-  'Google UK English Female',
-  'en-US-Neural2-C',// Chrome neural female
-  'en-US-Neural2-E',
-  'en-US-Wavenet-C',
-  'en-US-Wavenet-E',
-  'en-US-Wavenet-F',
 ];
 
 let _preferredVoice = null;
+let _activeAudio = null; // currently playing custom audio (if any)
+
+function isVoiceSelected(voice) {
+  const current = accessibilitySettings.voiceName || '';
+  return current && (voice.name === current || voice.name.includes(current));
+}
+
+function populateVoiceList() {
+  const voiceList = document.getElementById('voice-list');
+  if (!voiceList) return;
+  const voices = window.speechSynthesis.getVoices();
+  if (!voices.length) {
+    voiceList.innerHTML = '<div style="color:#333;">Loading voices… please reopen settings if the list is empty.</div>';
+    return;
+  }
+
+  const availableVoices = voices.filter(v => v.lang.startsWith('en'));
+  const voicesToShow = availableVoices.length ? availableVoices : voices;
+  const current = accessibilitySettings.voiceName || '';
+
+  voiceList.innerHTML = '';
+  for (const voice of voicesToShow) {
+    const item = document.createElement('div');
+    item.style.display = 'flex';
+    item.style.justifyContent = 'space-between';
+    item.style.alignItems = 'center';
+    item.style.padding = '10px';
+    item.style.borderBottom = '1px solid #ddd';
+    if (isVoiceSelected(voice)) item.style.background = '#e6f7ff';
+
+    const label = document.createElement('div');
+    label.innerHTML = `<strong>${voice.name}</strong> <span style="font-size:0.9rem;color:#555;">${voice.lang}</span>`;
+
+    const controls = document.createElement('div');
+    controls.style.display = 'flex';
+    controls.style.gap = '8px';
+
+    const sampleButton = document.createElement('button');
+    sampleButton.textContent = 'Sample';
+    sampleButton.style.padding = '8px 12px';
+    sampleButton.style.border = 'none';
+    sampleButton.style.borderRadius = '10px';
+    sampleButton.style.background = '#4CAF50';
+    sampleButton.style.color = '#fff';
+    sampleButton.style.cursor = 'pointer';
+    sampleButton.onclick = () => sampleVoice(voice.name);
+
+    const chooseButton = document.createElement('button');
+    chooseButton.textContent = isVoiceSelected(voice) ? 'Selected' : 'Choose';
+    chooseButton.style.padding = '8px 12px';
+    chooseButton.style.border = 'none';
+    chooseButton.style.borderRadius = '10px';
+    chooseButton.style.background = isVoiceSelected(voice) ? '#999' : '#1E90FF';
+    chooseButton.style.color = '#fff';
+    chooseButton.style.cursor = isVoiceSelected(voice) ? 'default' : 'pointer';
+    chooseButton.disabled = isVoiceSelected(voice);
+    chooseButton.onclick = () => {
+      accessibilitySettings.voiceName = voice.name;
+      _preferredVoice = null;
+      populateVoiceList();
+    };
+
+    controls.appendChild(sampleButton);
+    controls.appendChild(chooseButton);
+    item.appendChild(label);
+    item.appendChild(controls);
+    voiceList.appendChild(item);
+  }
+}
+
+function sampleVoice(voiceName) {
+  const voices = window.speechSynthesis.getVoices();
+  const voice = voices.find(v => v.name === voiceName || v.name.includes(voiceName));
+  if (!voice) return;
+
+  // Stop any currently playing custom audio and cancel queued speech
+  try { if (_activeAudio) { _activeAudio.pause(); _activeAudio.currentTime = 0; _activeAudio = null; } } catch(e) {}
+  try { window.speechSynthesis.cancel(); } catch(e) {}
+
+  const utterance = new SpeechSynthesisUtterance(`This is a sample of the ${voice.name} voice.`);
+  utterance.voice = voice;
+  utterance.rate = accessibilitySettings.speechRate;
+  utterance.volume = accessibilitySettings.volume;
+  utterance.pitch = 1.0;
+  window.speechSynthesis.speak(utterance);
+}
 
 function getPreferredVoice() {
   if (_preferredVoice) return _preferredVoice;
   const voices = window.speechSynthesis.getVoices();
   if (!voices.length) return null;
 
-  // Try ranked list first
-  for (const name of FEMALE_VOICE_PRIORITY) {
+  if (accessibilitySettings.voiceName) {
+    const selected = voices.find(v =>
+      v.name === accessibilitySettings.voiceName || v.name.includes(accessibilitySettings.voiceName)
+    );
+    if (selected) { _preferredVoice = selected; return selected; }
+  }
+
+  for (const name of PREFERRED_VOICE_PRIORITY) {
     const v = voices.find(v => v.name.includes(name));
     if (v) { _preferredVoice = v; return v; }
   }
-  // Fallback: any English female voice
-  const femaleEnglish = voices.find(v =>
-    v.lang.startsWith('en') && /female|woman|girl/i.test(v.name)
-  );
-  if (femaleEnglish) { _preferredVoice = femaleEnglish; return femaleEnglish; }
-  // Fallback: any English voice
+
   const anyEnglish = voices.find(v => v.lang.startsWith('en'));
   if (anyEnglish) { _preferredVoice = anyEnglish; return anyEnglish; }
-  return null;
+  _preferredVoice = voices[0];
+  return voices[0];
 }
 
 // Re-resolve voice after voices list loads (async on some browsers)
-window.speechSynthesis.onvoiceschanged = () => { _preferredVoice = null; };
+window.speechSynthesis.onvoiceschanged = () => {
+  _preferredVoice = null;
+  populateVoiceList();
+};
 
 function speakText(text, rate, volume, onEnd) {
+  // Ensure only the most recent sound plays: stop any custom audio and cancel prior speech
+  try { if (_activeAudio) { _activeAudio.pause(); _activeAudio.currentTime = 0; _activeAudio = null; } } catch(e) {}
+  try { window.speechSynthesis.cancel(); } catch(e) {}
+
   const utt = new SpeechSynthesisUtterance(text);
   utt.rate   = rate   ?? accessibilitySettings.speechRate;
   utt.volume = volume ?? accessibilitySettings.volume;
-  utt.pitch  = 1.1;   // slightly higher pitch for warmth
+  utt.pitch  = 1.0;   // neutral pitch for better voice quality
   const voice = getPreferredVoice();
   if (voice) utt.voice = voice;
   if (onEnd) utt.onend = onEnd;
@@ -255,9 +353,15 @@ function saveVoiceRecordingToStorage() {
 function playCustomRecording(key, onEnded) {
   const dataUrl = customVoiceRecordings[key.toUpperCase()];
   if (!dataUrl) return false;
+  // Stop any TTS currently speaking and any previously playing custom audio
+  try { window.speechSynthesis.cancel(); } catch(e) {}
+  try { if (_activeAudio) { _activeAudio.pause(); _activeAudio.currentTime = 0; _activeAudio = null; } } catch(e) {}
+
   const audio = new Audio(dataUrl);
+  _activeAudio = audio;
   audio.volume = accessibilitySettings.volume;
   if (onEnded) audio.addEventListener('ended', onEnded);
+  audio.addEventListener('ended', () => { if (_activeAudio === audio) _activeAudio = null; });
   audio.play().catch(() => {});
   return true;
 }
@@ -371,6 +475,7 @@ function loadHome() {
   // Ensure keyboard listeners are removed
   document.removeEventListener('keydown', handleKeyPress);
   document.removeEventListener('keydown', handleWordBuilderKeyDown);
+  document.removeEventListener('keydown', handleShapesKeyDown);
 
   gameContainer.innerHTML = `
     <style>
@@ -433,10 +538,15 @@ function loadHome() {
         <div class="tile-title">SHAPES</div>
         <div class="tile-sub">Find and match fun shapes</div>
       </div>
-      <div class="game-tile" onclick="loadGame('voicerecorder')">
+      <div class="game-tile" onclick="loadGame('trace')">
+        <div class="tile-icon">✍️</div>
+        <div class="tile-title">Trace Letters</div>
+        <div class="tile-sub">Trace A and a with touch or mouse</div>
+      </div>
+      <div class="game-tile" onclick="showSettings(); setSettingsTab('voices')">
         <div class="tile-icon">🎙️</div>
-        <div class="tile-title">Record My Voice</div>
-        <div class="tile-sub">Replace robot voice with yours</div>
+        <div class="tile-title">Change Voice</div>
+        <div class="tile-sub">Pick from available voice options</div>
       </div>
     </div>
   `;
@@ -477,6 +587,9 @@ function loadGame(gameName) {
       break;
     case 'shapes':
       loadShapesGame();
+      break;
+    case 'trace':
+      loadTraceGame();
       break;
     case 'voicerecorder':
       stopBgMusic(300);
@@ -1646,10 +1759,10 @@ function loadShapesGame() {
         width: 180px;
         height: 180px;
         border: none;
-        border-radius: 20px;
+        border-radius: 0;
         cursor: pointer;
-        background: #ffffff;
-        box-shadow: 0 8px 16px rgba(0,0,0,0.16);
+        background: transparent;
+        box-shadow: none;
         transition: left 0.35s ease, top 0.35s ease, transform 0.35s ease, box-shadow 0.35s ease;
         font-size: 3.8rem;
         font-weight: bold;
@@ -1672,6 +1785,32 @@ function loadShapesGame() {
         transform: scale(1.28);
         box-shadow: 0 18px 30px rgba(0,0,0,0.24);
         z-index: 2;
+      }
+      .shape-btn.spin-pop {
+        animation: shapeSpinPop 900ms cubic-bezier(.22,.9,.28,1) forwards;
+        transform-origin: center center;
+        pointer-events: none;
+      }
+
+      @keyframes shapeSpinPop {
+        0% { transform: rotate(0deg) scale(1); opacity: 1; }
+        80% { transform: rotate(360deg) scale(1.02); opacity: 1; }
+        100% { transform: rotate(360deg) scale(0); opacity: 0; }
+      }
+
+      .confetti-piece {
+        position: absolute;
+        width: 10px;
+        height: 12px;
+        border-radius: 2px;
+        pointer-events: none;
+        will-change: transform, opacity, top, left;
+        mix-blend-mode: screen;
+      }
+
+      @keyframes confettiFloat {
+        0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+        100% { transform: translateY(-120px) rotate(720deg); opacity: 0; }
       }
       .shape-status {
         min-height: 26px;
@@ -1715,7 +1854,7 @@ function loadShapesGame() {
     </style>
     <div class="shapes-wrap">
       <h2>SHAPES Game</h2>
-      <p>Tap any shape. After 2 seconds, the game says its name.</p>
+      <p>Tap any shape and listen. It says the shape name, then disappears.</p>
       <button class="shape-start-btn" onclick="startShapesGame()">Start SHAPES</button>
       <button id="shapes-replay-btn" class="shape-replay-btn" onclick="startShapesGame()">Play Again</button>
       <div style="margin-bottom: 12px; font-size:0.95rem; color:#333;">
@@ -1741,6 +1880,8 @@ function startShapesGame() {
   setShapesStatus('Tap a shape to hear it spoken.');
   toggleShapesReplay(false);
   renderShapeOptions(shapeBank);
+  document.removeEventListener('keydown', handleShapesKeyDown);
+  document.addEventListener('keydown', handleShapesKeyDown);
 
   const targetEl = document.getElementById('shapes-target');
   if (targetEl) {
@@ -1759,11 +1900,18 @@ function renderShapeOptions(options) {
 
   const maxLeft = Math.max(0, playfield.clientWidth - buttonSize);
   const maxTop = Math.max(0, playfield.clientHeight - buttonSize);
+  // center to avoid (don't place shapes too close to the visual center)
+  const centerAvoid = {
+    x: Math.round(playfield.clientWidth / 2),
+    y: Math.round(playfield.clientHeight / 2),
+    radius: Math.round(buttonSize * 0.95) // roughly one button diameter
+  };
 
   options.forEach((shape) => {
     const button = document.createElement('button');
     button.className = 'shape-btn';
     button.setAttribute('aria-label', shape.name);
+    button.dataset.shapeName = shape.name;
     button.onclick = (event) => handleShapeChoice(shape, event.currentTarget);
 
     const symbol = document.createElement('span');
@@ -1773,7 +1921,7 @@ function renderShapeOptions(options) {
     symbol.style.transform = `scale(${shape.scale || 1})`;
     button.appendChild(symbol);
 
-    const position = getRandomNonOverlappingPosition(maxLeft, maxTop, buttonSize, placedPositions);
+    const position = getRandomNonOverlappingPosition(maxLeft, maxTop, buttonSize, placedPositions, centerAvoid);
     button.style.left = `${position.left}px`;
     button.style.top = `${position.top}px`;
 
@@ -1782,7 +1930,7 @@ function renderShapeOptions(options) {
   });
 }
 
-function getRandomNonOverlappingPosition(maxLeft, maxTop, buttonSize, placedPositions) {
+function getRandomNonOverlappingPosition(maxLeft, maxTop, buttonSize, placedPositions, centerAvoid) {
   const attempts = 30;
   const minGap = buttonSize * 0.7;
 
@@ -1792,11 +1940,26 @@ function getRandomNonOverlappingPosition(maxLeft, maxTop, buttonSize, placedPosi
       top: Math.floor(Math.random() * (maxTop + 1))
     };
 
-    const overlaps = placedPositions.some((pos) => {
-      const dx = pos.left - candidate.left;
-      const dy = pos.top - candidate.top;
-      return Math.hypot(dx, dy) < minGap;
-    });
+    // avoid center region if requested
+    let overlaps = false;
+    if (centerAvoid && typeof centerAvoid.x === 'number') {
+      const candidateCenterX = candidate.left + buttonSize / 2;
+      const candidateCenterY = candidate.top + buttonSize / 2;
+      const dxC = candidateCenterX - centerAvoid.x;
+      const dyC = candidateCenterY - centerAvoid.y;
+      if (Math.hypot(dxC, dyC) < (centerAvoid.radius || 0)) {
+        overlaps = true;
+      }
+    }
+
+    // check against already placed positions
+    if (!overlaps) {
+      overlaps = placedPositions.some((pos) => {
+        const dx = pos.left - candidate.left;
+        const dy = pos.top - candidate.top;
+        return Math.hypot(dx, dy) < minGap;
+      });
+    }
 
     if (!overlaps) {
       return candidate;
@@ -1809,6 +1972,38 @@ function getRandomNonOverlappingPosition(maxLeft, maxTop, buttonSize, placedPosi
   };
 }
 
+function handleShapesKeyDown(event) {
+  if (event.code === 'Space' || event.key === ' ') {
+    event.preventDefault();
+    triggerSpacePop();
+  }
+}
+
+function triggerSpacePop() {
+  const playfield = document.getElementById('shapes-grid');
+  if (!playfield) return;
+  const buttons = Array.from(playfield.querySelectorAll('.shape-btn'));
+  if (!buttons.length) return;
+
+  // choose a random visible button
+  const btn = buttons[Math.floor(Math.random() * buttons.length)];
+  if (!btn || btn.disabled) return;
+
+  const shapeName = btn.dataset.shapeName || btn.getAttribute('aria-label') || 'shape';
+  isShapeSpeakPending = true;
+  shapesScore += 1;
+  shapesRound += 1;
+  updateShapesHud();
+  btn.disabled = true;
+  btn.classList.add('is-selected');
+  moveShapeToCenter(btn);
+  setShapesStatus('Listen...');
+
+  speakThisIsAThenShape(shapeName, () => {
+    animateAndRemoveShapeButton(btn, playfield);
+  });
+}
+
 function handleShapeChoice(shape, shapeButton) {
   if (isShapeSpeakPending) return;
 
@@ -1818,22 +2013,14 @@ function handleShapeChoice(shape, shapeButton) {
   updateShapesHud();
 
   if (shapeButton && shapeButton.classList) {
-    moveShapeToCenter(shapeButton);
-    shapeButton.classList.add('is-selected');
     shapeButton.disabled = true;
+    moveShapeToCenter(shapeButton);
   }
 
-  setShapesStatus('Nice tap! Listen...');
+  setShapesStatus('Listen...');
   speakThisIsAThenShape(shape.name, () => {
-    if (shapeButton && typeof shapeButton.remove === 'function') {
-      shapeButton.remove();
-    }
-    if (isShapesGameOver()) {
-      finishShapesGame();
-    } else {
-      setShapesStatus('Tap another shape.');
-    }
-    isShapeSpeakPending = false;
+    const playfield = document.getElementById('shapes-grid');
+    animateAndRemoveShapeButton(shapeButton, playfield);
   });
 }
 
@@ -1895,6 +2082,32 @@ function setShapesStatus(message) {
   }
 }
 
+function animateAndRemoveShapeButton(shapeButton, playfield) {
+  if (!shapeButton || !shapeButton.classList) {
+    isShapeSpeakPending = false;
+    return;
+  }
+
+  const rect = shapeButton.getBoundingClientRect();
+  const playfieldRect = playfield ? playfield.getBoundingClientRect() : { left: 0, top: 0 };
+  const centerX = rect.left - playfieldRect.left + rect.width / 2;
+  const centerY = rect.top - playfieldRect.top + rect.height / 2;
+
+  shapeButton.classList.add('is-selected');
+  shapeButton.classList.add('spin-pop');
+  try { spawnConfetti(playfield, centerX, centerY, 20); } catch (e) {}
+
+  shapeButton.addEventListener('animationend', () => {
+    try { shapeButton.remove(); } catch (e) {}
+    if (isShapesGameOver()) {
+      finishShapesGame();
+    } else {
+      setShapesStatus('Tap another shape.');
+    }
+    isShapeSpeakPending = false;
+  }, { once: true });
+}
+
 function speakShapeName(name) {
   speakText(name, accessibilitySettings.speechRate, accessibilitySettings.volume);
 }
@@ -1934,11 +2147,440 @@ function speakThisIsAThenShape(name, onDone) {
   setTimeout(finish, 7000);
 }
 
+function spawnConfetti(playfield, centerX, centerY, count = 20) {
+  if (!playfield) return;
+  const colors = ['#FF3B30', '#FF9500', '#FFCC00', '#34C759', '#0AC9A7', '#0A84FF', '#5856D6', '#FF2D55'];
+
+  for (let i = 0; i < count; i += 1) {
+    const piece = document.createElement('div');
+    piece.className = 'confetti-piece';
+    const color = colors[Math.floor(Math.random() * colors.length)];
+    piece.style.background = color;
+    // random size
+    const w = 6 + Math.floor(Math.random() * 12);
+    const h = 8 + Math.floor(Math.random() * 16);
+    piece.style.width = `${w}px`;
+    piece.style.height = `${h}px`;
+
+    // starting position (centered)
+    const startLeft = Math.max(0, Math.round(centerX - w / 2));
+    const startTop = Math.max(0, Math.round(centerY - h / 2));
+    piece.style.left = `${startLeft}px`;
+    piece.style.top = `${startTop}px`;
+    playfield.appendChild(piece);
+
+    // animate using Web Animations API for per-piece dynamics
+    const dx = Math.floor((Math.random() - 0.5) * 240); // horizontal burst
+    const dy = 100 + Math.floor(Math.random() * 160); // vertical rise
+    const rot = 360 + Math.floor(Math.random() * 720);
+    const dur = 800 + Math.floor(Math.random() * 800);
+
+    const keyframes = [
+      { transform: `translate(0px,0px) rotate(0deg)`, opacity: 1 },
+      { transform: `translate(${dx}px, ${-dy}px) rotate(${rot}deg)`, opacity: 0 }
+    ];
+    const anim = piece.animate(keyframes, { duration: dur, easing: 'cubic-bezier(.2,.8,.2,1)', fill: 'forwards' });
+    anim.onfinish = () => { try { piece.remove(); } catch(e) {} };
+  }
+}
+
+// ── Trace Letters Game ──────────────────────────────────────────────────────
+function loadTraceGame() {
+  const screen = document.getElementById('game-screen');
+  screen.innerHTML = `
+    <style>
+      .trace-wrap { max-width: 900px; margin: 0 auto; }
+      .trace-row { display:flex; gap:14px; flex-wrap:wrap; justify-content:center; }
+      .trace-col { width: 44%; min-width:260px; text-align:center; }
+      .trace-canvas { width:100%; height:380px; border-radius:12px; background:linear-gradient(180deg,#fff,#f6f9ff); box-shadow:0 8px 18px rgba(0,0,0,0.12); touch-action:none; }
+      .trace-controls { margin-top:8px; display:flex; gap:8px; justify-content:center; }
+      .trace-status { min-height:20px; font-weight:bold; margin-top:8px; color:#333; }
+      @media (max-width:720px) { .trace-col { width:100%; } .trace-canvas { height:300px; } }
+    </style>
+    <div class="trace-wrap">
+      <h2>Trace Letters</h2>
+      <p>Trace the large letters using your finger or mouse. Dashed lines show the letter shape.</p>
+      <div id="trace-letters-container"></div>
+    </div>
+  `;
+
+  _traceCurrentLetter = 0;
+  _traceCompletedLetters = new Set();
+  loadNextTraceLetter();
+}
+
+const _traceState = {};
+let _traceCurrentLetter = 0;
+let _traceCompletedLetters = new Set();
+
+function loadNextTraceLetter() {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+  if (_traceCurrentLetter >= alphabet.length) {
+    const container = document.getElementById('trace-letters-container');
+    if (container) {
+      container.innerHTML = '<div style="padding:20px;text-align:center;font-size:18px;color:#444;"><strong>🎉 Fantastic! You traced all 26 letters!</strong></div>';
+  speakText('Fantastic work! You traced all 26 letters of the alphabet!', 0.9, 1.0);
+    }
+    return;
+  }
+
+  const letter = alphabet[_traceCurrentLetter];
+  const upperLetter = letter.toUpperCase();
+  const lowerLetter = letter.toLowerCase();
+
+  const container = document.getElementById('trace-letters-container');
+  if (!container) return;
+
+  container.innerHTML = `
+    <div class="trace-row">
+      <div class="trace-col">
+        <div style="font-size:14px;color:#444;margin-bottom:6px;">Uppercase ${upperLetter}</div>
+        <canvas id="trace-canvas-${upperLetter}" class="trace-canvas"></canvas>
+        <div class="trace-controls"><button id="clear-btn-${upperLetter}" onclick="clearTrace('${upperLetter}')">Clear</button><button id="submit-btn-${upperLetter}" onclick="submitTrace('${upperLetter}')">Submit</button></div>
+        <div id="trace-status-${upperLetter}" class="trace-status"></div>
+      </div>
+      <div class="trace-col">
+        <div style="font-size:14px;color:#444;margin-bottom:6px;">Lowercase ${lowerLetter}</div>
+        <canvas id="trace-canvas-${lowerLetter}" class="trace-canvas"></canvas>
+        <div class="trace-controls"><button id="clear-btn-${lowerLetter}" onclick="clearTrace('${lowerLetter}')">Clear</button><button id="submit-btn-${lowerLetter}" onclick="submitTrace('${lowerLetter}')">Submit</button></div>
+        <div id="trace-status-${lowerLetter}" class="trace-status"></div>
+      </div>
+    </div>
+  `;
+
+  // Initialize both canvases for this letter
+  initTraceCanvas(`trace-canvas-${upperLetter}`, upperLetter);
+  initTraceCanvas(`trace-canvas-${lowerLetter}`, lowerLetter);
+  
+  speakText('Trace the letter ' + lowerLetter + '.', 0.9, 1.0);
+}
+
+function initTraceCanvas(canvasId, letter) {
+  const el = document.getElementById(canvasId);
+  if (!el) return;
+
+  // setup high-DPI canvas
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  const rect = el.getBoundingClientRect();
+  el.width = Math.round(rect.width * dpr);
+  el.height = Math.round(rect.height * dpr);
+  el.style.width = `${rect.width}px`;
+  el.style.height = `${rect.height}px`;
+
+  const ctx = el.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+
+  // offscreen mask canvas with letter stroke
+  const mask = document.createElement('canvas');
+  mask.width = el.width;
+  mask.height = el.height;
+  const mctx = mask.getContext('2d');
+  mctx.scale(dpr, dpr);
+  mctx.clearRect(0,0,el.width/dpr,el.height/dpr);
+
+  // draw the target letter path as a hidden mask with adequate line width for full coverage
+  const fontSize = Math.min(rect.width, rect.height) * 0.6;
+  mctx.font = `700 ${fontSize}px Nunito, Arial, sans-serif`;
+  mctx.textBaseline = 'middle';
+  mctx.textAlign = 'center';
+  const cx = rect.width / 2;
+  const cy = rect.height / 2;
+  mctx.lineWidth = Math.max(10, fontSize * 0.09);
+  mctx.strokeStyle = 'black';
+  const isLowercase = letter === letter.toLowerCase() && letter !== letter.toUpperCase();
+  mctx.strokeText(letter, cx, cy + (isLowercase ? fontSize * 0.06 : 0));
+
+  // draw a single dashed line guide on the visible canvas
+  ctx.clearRect(0,0,rect.width,rect.height);
+  ctx.globalAlpha = 0.28;
+  ctx.lineWidth = Math.max(6, fontSize * 0.06);
+  ctx.font = `700 ${fontSize}px Nunito, Arial, sans-serif`;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'center';
+  ctx.strokeStyle = '#999';
+  ctx.setLineDash([10, 10]);
+  ctx.strokeText(letter, cx, cy + (isLowercase ? fontSize * 0.06 : 0));
+  ctx.setLineDash([]);
+  ctx.globalAlpha = 1;
+
+  // create a fill layer that will track tracing progress
+  const fillCanvas = document.createElement('canvas');
+  fillCanvas.width = mask.width;
+  fillCanvas.height = mask.height;
+  const fillCtx = fillCanvas.getContext('2d');
+  fillCtx.clearRect(0, 0, fillCanvas.width, fillCanvas.height);
+
+  // drawing layer sits on top; only mark path points on pointer over the fixed path
+  el.addEventListener('pointerdown', (ev) => startTracePointer(ev, el));
+  window.addEventListener('pointermove', (ev) => continueTracePointer(ev, el));
+  window.addEventListener('pointerup', (ev) => endTracePointer(ev, el));
+
+  const pathPixelCount = countMaskPixels(mctx, mask.width, mask.height);
+  const st = {
+    canvas: el,
+    ctx,
+    mask,
+    maskCtx: mctx,
+    fillCanvas,
+    fillCtx,
+    dpr,
+    drawing: false,
+    lastValid: null,
+    disabled: false,
+    pathPixelCount,
+    filledPixelCount: 0
+  };
+  _traceState[canvasId] = st;
+}
+
+function getTraceStateForLetter(letterKey) {
+  const id = `trace-canvas-${letterKey}`;
+  return _traceState[id];
+}
+
+function startTracePointer(ev, canvas) {
+  if (!canvas) return;
+  const st = _traceState[canvas.id];
+  if (!st) return;
+  if (st.disabled) return;
+  const r = canvas.getBoundingClientRect();
+  const x = (ev.clientX - r.left);
+  const y = (ev.clientY - r.top);
+  if (!isPointInMask(st, x, y)) {
+    return;
+  }
+  st.drawing = true;
+  fillPathPoint(st, x, y);
+  st.lastValid = { x, y };
+  ev.preventDefault();
+}
+
+function continueTracePointer(ev, canvas) {
+  if (!canvas) return;
+  const st = _traceState[canvas.id];
+  if (!st || !st.drawing || st.disabled) return;
+  const r = canvas.getBoundingClientRect();
+  const x = (ev.clientX - r.left);
+  const y = (ev.clientY - r.top);
+  if (isPointInMask(st, x, y)) {
+    fillPathPoint(st, x, y);
+    st.lastValid = { x, y };
+    try {
+      // Extract letter from canvas ID (e.g., 'trace-canvas-A' -> 'A')
+      const letterKey = canvas.id.replace('trace-canvas-', '');
+      if (computeTraceRatio(st) >= 0.60) {
+        submitTrace(letterKey);
+      }
+    } catch(e) {}
+  }
+  ev.preventDefault();
+}
+
+function endTracePointer(ev, canvas) {
+  if (!canvas) return;
+  const st = _traceState[canvas.id];
+  if (!st) return;
+  if (st.drawing) {
+    try { st.ctx.closePath(); } catch(e) {}
+  }
+  st.drawing = false;
+  st.lastValid = null;
+}
+
+function clearTrace(letterKey) {
+  const id = `trace-canvas-${letterKey}`;
+  const st = _traceState[id];
+  if (!st) return;
+  const canvas = st.canvas;
+  const rect = canvas.getBoundingClientRect();
+  st.fillCtx.clearRect(0,0,st.fillCanvas.width,st.fillCanvas.height);
+  st.filledPixelCount = 0;
+  st.ctx.clearRect(0,0,rect.width,rect.height);
+  st.lastValid = null;
+  st.ctx.globalAlpha = 0.28;
+  const fontSize = Math.min(rect.width, rect.height) * 0.6;
+  st.ctx.lineWidth = Math.max(6, fontSize * 0.06);
+  st.ctx.font = `700 ${fontSize}px Nunito, Arial, sans-serif`;
+  st.ctx.textBaseline = 'middle';
+  st.ctx.textAlign = 'center';
+  st.ctx.strokeStyle = '#999';
+  st.ctx.setLineDash([10, 10]);
+  const isLowercase = letterKey === letterKey.toLowerCase() && letterKey !== letterKey.toUpperCase();
+  st.ctx.strokeText(letterKey, rect.width/2, rect.height/2 + (isLowercase ? fontSize*0.06 : 0));
+  st.ctx.setLineDash([]);
+  st.ctx.globalAlpha = 1;
+  const status = document.getElementById(`trace-status-${letterKey}`);
+  if (status) status.textContent = '';
+  const submitBtn = document.getElementById(`submit-btn-${letterKey}`);
+  if (submitBtn) submitBtn.style.display = 'inline-block';
+  st.disabled = false;
+}
+
+function submitTrace(letterKey) {
+  const canvasId = `trace-canvas-${letterKey}`;
+  const st = _traceState[canvasId];
+  if (!st || st.disabled) return;
+  const ratio = computeTraceRatio(st);
+  const status = document.getElementById(`trace-status-${letterKey}`);
+  const isUppercase = letterKey === letterKey.toUpperCase();
+  const spoken = isUppercase ? `Uppercase ${letterKey}` : `Lowercase ${letterKey}`;
+  
+  if (ratio >= 0.60) {
+    if (status) status.textContent = 'Perfect tracing!';
+    speakText(spoken + ' — excellent!', accessibilitySettings.speechRate, accessibilitySettings.volume);
+    const submitBtn = document.getElementById(`submit-btn-${letterKey}`);
+    if (submitBtn) submitBtn.style.display = 'none';
+    st.disabled = true;
+    _traceCompletedLetters.add(letterKey);
+    try {
+      const canvasRect = st.canvas.getBoundingClientRect();
+      spawnConfetti(document.getElementById('game-screen'), canvasRect.left + canvasRect.width / 2, canvasRect.top + canvasRect.height / 2, 28);
+    } catch(e) {}
+    
+    if (isUppercase) {
+      // After uppercase is done, highlight lowercase
+      const lowerKey = letterKey.toLowerCase();
+      const nextId = `trace-canvas-${lowerKey}`;
+      const nextSt = _traceState[nextId];
+      if (nextSt && !nextSt.disabled) {
+        const nextStatus = document.getElementById(`trace-status-${lowerKey}`);
+        if (nextStatus) nextStatus.textContent = `Now try lowercase ${lowerKey}`;
+        try {
+          nextSt.canvas.style.outline = '4px solid #FFD700';
+          setTimeout(() => { nextSt.canvas.style.outline = ''; }, 900);
+          nextSt.canvas.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } catch(e) {}
+      }
+    } else {
+      // After lowercase is done, move to next letter
+      _traceCurrentLetter += 1;
+      setTimeout(() => {
+        loadNextTraceLetter();
+      }, 800);
+    }
+  } else if (ratio >= 0.55) {
+    if (status) status.textContent = 'Almost there — just a little more!';
+    speakText(spoken + ' — almost there, just a little more.', accessibilitySettings.speechRate, accessibilitySettings.volume);
+  } else if (ratio >= 0.15) {
+    if (status) status.textContent = 'Good start — try to follow the shape more closely.';
+    speakText(spoken + ' — good try, keep going along the shape.', accessibilitySettings.speechRate, accessibilitySettings.volume);
+  } else {
+    if (status) status.textContent = 'Try again — follow the letter stroke.';
+    speakText(spoken + ' — try again.', accessibilitySettings.speechRate, accessibilitySettings.volume);
+  }
+}
+
+function computeTraceRatio(st) {
+  if (!st || !st.mask || !st.fillCanvas) return 0;
+  const mask = st.mask;
+  const md = st.maskCtx.getImageData(0,0,mask.width,mask.height).data;
+  const dd = st.fillCtx.getImageData(0,0,st.fillCanvas.width,st.fillCanvas.height).data;
+
+  let maskCount = 0;
+  let hitCount = 0;
+  for (let i = 0; i < md.length; i += 4) {
+    if (md[i+3] > 40) {
+      maskCount += 1;
+      if (dd[i+3] > 30) hitCount += 1;
+    }
+  }
+  return maskCount > 0 ? (hitCount / maskCount) : 0;
+}
+
+function isPointInMask(st, x, y) {
+  if (!st || !st.mask) return false;
+  const dpr = st.dpr || Math.max(1, window.devicePixelRatio || 1);
+  const mx = Math.floor(x * dpr);
+  const my = Math.floor(y * dpr);
+  if (mx < 0 || my < 0 || mx >= st.mask.width || my >= st.mask.height) return false;
+  try {
+    const data = st.maskCtx.getImageData(mx, my, 1, 1).data;
+    return data[3] > 40;
+  } catch(e) {
+    return false;
+  }
+}
+
+function fillPathPoint(st, x, y) {
+  if (!st || !st.fillCtx) return;
+  const dpr = st.dpr || Math.max(1, window.devicePixelRatio || 1);
+  const mx = Math.floor(x * dpr);
+  const my = Math.floor(y * dpr);
+  const fontSize = Math.min(st.canvas.getBoundingClientRect().width, st.canvas.getBoundingClientRect().height) * 0.6;
+  const pathLineWidth = Math.max(10, fontSize * 0.09);
+
+  st.ctx.strokeStyle = '#e23';
+  st.ctx.lineWidth = pathLineWidth;
+  st.ctx.lineCap = 'round';
+  st.ctx.lineJoin = 'round';
+  st.ctx.beginPath();
+  if (st.lastValid) {
+    st.ctx.moveTo(st.lastValid.x, st.lastValid.y);
+    st.ctx.lineTo(x, y);
+  } else {
+    st.ctx.moveTo(x, y);
+    st.ctx.lineTo(x, y);
+  }
+  st.ctx.stroke();
+  st.ctx.closePath();
+
+  st.fillCtx.strokeStyle = 'rgba(255, 30, 30, 1)';
+  st.fillCtx.lineWidth = pathLineWidth * dpr;
+  st.fillCtx.lineCap = 'round';
+  st.fillCtx.lineJoin = 'round';
+  st.fillCtx.beginPath();
+  if (st.lastValid) {
+    st.fillCtx.moveTo(st.lastValid.x * dpr, st.lastValid.y * dpr);
+    st.fillCtx.lineTo(mx, my);
+  } else {
+    st.fillCtx.moveTo(mx, my);
+    st.fillCtx.lineTo(mx, my);
+  }
+  st.fillCtx.stroke();
+  st.fillCtx.closePath();
+
+  // mask fill to only show pixels on the path
+  const fillData = st.fillCtx.getImageData(0, 0, st.fillCanvas.width, st.fillCanvas.height);
+  const maskData = st.maskCtx.getImageData(0, 0, st.mask.width, st.mask.height);
+  for (let i = 0; i < fillData.data.length; i += 4) {
+    if (maskData.data[i + 3] <= 40) {
+      fillData.data[i + 3] = 0;
+    }
+  }
+  st.fillCtx.putImageData(fillData, 0, 0);
+}
+
+function countMaskPixels(mctx, width, height) {
+  let count = 0;
+  try {
+    const data = mctx.getImageData(0, 0, width, height).data;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] > 40) count += 1;
+    }
+  } catch(e) {
+    return 0;
+  }
+  return count;
+}
+
+function rectWidthMid(canvas) {
+  try { const r = canvas.getBoundingClientRect(); return Math.round(r.left + r.width / 2); } catch(e) { return 0; }
+}
+
+function rectHeightMid(canvas) {
+  try { const r = canvas.getBoundingClientRect(); return Math.round(r.top + r.height / 2); } catch(e) { return 0; }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+
 // Accessibility settings (placeholder)
 const accessibilitySettings = {
   volume: 0.5,
   visualIntensity: 1.0,
-  speechRate: 0.8
+  speechRate: 0.8,
+  voiceName: ''
 };
 
 // Function to update settings (will be expanded)
@@ -1954,6 +2596,8 @@ function showSettings() {
   document.getElementById('volume-slider').value = accessibilitySettings.volume;
   document.getElementById('speech-slider').value = accessibilitySettings.speechRate;
   document.getElementById('visual-slider').value = accessibilitySettings.visualIntensity;
+  setSettingsTab('general');
+  populateVoiceList();
   const ms = document.getElementById('music-select');
   if (ms) ms.value = selectedBgMusic;
 }
@@ -1970,4 +2614,28 @@ function saveSettings() {
   if (ms) selectBgMusic(ms.value);
   hideSettings();
   alert('Settings saved!');
+}
+
+function setSettingsTab(tab) {
+  const general = document.getElementById('settings-general');
+  const voices = document.getElementById('settings-voices');
+  const generalBtn = document.getElementById('settings-tab-general');
+  const voicesBtn = document.getElementById('settings-tab-voices');
+  if (!general || !voices || !generalBtn || !voicesBtn) return;
+
+  if (tab === 'voices') {
+    general.style.display = 'none';
+    voices.style.display = 'block';
+    generalBtn.style.background = '#fff';
+    generalBtn.style.color = '#333';
+    voicesBtn.style.background = '#333';
+    voicesBtn.style.color = '#fff';
+  } else {
+    general.style.display = 'block';
+    voices.style.display = 'none';
+    generalBtn.style.background = '#333';
+    generalBtn.style.color = '#fff';
+    voicesBtn.style.background = '#fff';
+    voicesBtn.style.color = '#333';
+  }
 }
